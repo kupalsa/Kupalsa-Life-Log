@@ -1,0 +1,20 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+
+node_modules
+.npm-cache
+dist
+dist-ssr
+*.local
+
+# Life data lives in a separate private repo, never in this (public) code repo
+/data
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.sw?
