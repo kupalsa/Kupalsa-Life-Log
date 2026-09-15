@@ -1,5 +1,5 @@
 import { addDays } from "./dates";
-import type { IncomeMonth, Moment, Version } from "./types";
+import { noteLines, type IncomeMonth, type Moment, type Version } from "./types";
 
 export interface VersionSpan {
   version: Version;
@@ -46,10 +46,29 @@ export function incomeInSpan(spans: VersionSpan[], span: VersionSpan, income: In
   return { months, total, avg: months.length ? total / months.length : null };
 }
 
-/** "v7" → "v8"; anything else gets no guess. */
+/**
+ * Semver-style bumps: "2.0" → "3.0", "2.1" → "3.0", "v7" → "v8".
+ * Minor releases are the user's choice; the suggestion is always a major one.
+ */
 export function suggestNextName(versions: Version[]): string {
   const last = [...versions].sort((a, b) => a.startDate.localeCompare(b.startDate)).at(-1);
-  const match = last?.name.match(/^v(\d+)$/i);
-  if (match) return `v${Number(match[1]) + 1}`;
-  return versions.length ? "" : "v1";
+  if (!last) return "1.0";
+  const semver = last.name.match(/^(\D*)(\d+)(?:\.\d+)*$/);
+  if (semver && last.name.includes(".")) return `${semver[1]}${Number(semver[2]) + 1}.0`;
+  const plain = last.name.match(/^(\D*)(\d+)$/);
+  if (plain) return `${plain[1]}${Number(plain[2]) + 1}`;
+  return "";
+}
+
+/**
+ * Starting a new version: what was a known issue in the previous one is the
+ * checklist for this one. Issues marked fixed move to "Fixed"; the rest carry
+ * over as still-known.
+ */
+export function carryOverNotes(previous: Version | undefined, fixed: Set<string>) {
+  const known = previous ? noteLines(previous.notes.known) : [];
+  return {
+    fixed: known.filter((k) => fixed.has(k)).join("\n"),
+    known: known.filter((k) => !fixed.has(k)).join("\n"),
+  };
 }

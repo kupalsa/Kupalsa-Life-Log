@@ -105,6 +105,50 @@ export async function writeJSON<T>(
   }
 }
 
+/** Upload a binary file (photo) given base64 content without a data: prefix. */
+export async function writeBinary(
+  s: AppSettings,
+  path: string,
+  base64: string,
+  message: string,
+): Promise<void> {
+  const existing = await getFile(s, path);
+  const res = await fetch(`${apiBase(s)}/${path}`, {
+    method: "PUT",
+    headers: { ...headers(s), "Content-Type": "application/json" },
+    body: JSON.stringify({ message, content: base64, ...(existing ? { sha: existing.sha } : {}) }),
+  });
+  if (!res.ok) {
+    throw new GithubApiError(writeErrorMessage(res.status, path, await res.text()), res.status);
+  }
+}
+
+/** Remove a file. Already-gone counts as success — it's cleanup after a record delete. */
+export async function deleteFile(s: AppSettings, path: string, message: string): Promise<void> {
+  const existing = await getFile(s, path);
+  if (!existing) return;
+  const res = await fetch(`${apiBase(s)}/${path}`, {
+    method: "DELETE",
+    headers: { ...headers(s), "Content-Type": "application/json" },
+    body: JSON.stringify({ message, sha: existing.sha }),
+  });
+  if (!res.ok && res.status !== 404) {
+    throw new GithubApiError(`Could not delete ${path} (${res.status})`, res.status);
+  }
+}
+
+/**
+ * The data repo is private, so an <img src> can't reach its files — fetch the
+ * raw bytes with the token and let the caller make an object URL.
+ */
+export async function fetchRepoBlob(s: AppSettings, path: string): Promise<Blob> {
+  const res = await fetch(`${apiBase(s)}/${path}`, {
+    headers: { ...headers(s), Accept: "application/vnd.github.raw" },
+  });
+  if (!res.ok) throw new GithubApiError(`Could not load ${path} (${res.status})`, res.status);
+  return res.blob();
+}
+
 export interface ConnectionCheck {
   fullName: string;
   /** False when the token can read the repo but not write to it. */

@@ -1,10 +1,49 @@
 import { describe, expect, it } from "vitest";
 import { addDays, monthRange, shiftMonth, spanLabel } from "./dates";
 import { formatMoney, niceTicks, parseAmount, summarizeIncome } from "./money";
-import { incomeInSpan, spanAt, spanForMonth, suggestNextName, versionSpans } from "./versions";
-import { emptyDoc, mergeDocs, normalizeDoc, type Version } from "./types";
+import {
+  carryOverNotes,
+  incomeInSpan,
+  spanAt,
+  spanForMonth,
+  suggestNextName,
+  versionSpans,
+} from "./versions";
+import { ladderProgress, levelAt, stepLabel } from "./ladders";
+import { monthGrid } from "./calendar";
+import {
+  BOULDERING_LEVELS,
+  emptyDoc,
+  emptyNotes,
+  mergeDocs,
+  noteLines,
+  normalizeDoc,
+  type Ladder,
+  type Moment,
+  type Version,
+} from "./types";
 
-const v = (name: string, startDate: string): Version => ({ id: name, name, startDate, headline: "", note: "" });
+const v = (name: string, startDate: string, known = ""): Version => ({
+  id: name,
+  name,
+  startDate,
+  headline: "",
+  note: "",
+  notes: { ...emptyNotes(), known },
+});
+
+const moment = (id: string, date: string, extra: Partial<Moment> = {}): Moment => ({
+  id,
+  date,
+  title: id,
+  note: "",
+  area: "Climbing",
+  big: false,
+  photos: [],
+  ladder: null,
+  createdAt: `${date}T12:00:00.000Z`,
+  ...extra,
+});
 
 describe("dates", () => {
   it("shifts months across year boundaries", () => {
@@ -29,45 +68,105 @@ describe("dates", () => {
 });
 
 describe("versions", () => {
-  const spans = versionSpans([v("v7", "2026-09-14"), v("v5", "2024-01-01"), v("v6", "2025-06-20")]);
+  const spans = versionSpans([v("3.0", "2026-09-14"), v("1.0", "2024-01-01"), v("2.0", "2025-06-20")]);
 
   it("orders versions and ends each the day before the next", () => {
     expect(spans.map((s) => [s.version.name, s.start, s.end])).toEqual([
-      ["v5", "2024-01-01", "2025-06-19"],
-      ["v6", "2025-06-20", "2026-09-13"],
-      ["v7", "2026-09-14", null],
+      ["1.0", "2024-01-01", "2025-06-19"],
+      ["2.0", "2025-06-20", "2026-09-13"],
+      ["3.0", "2026-09-14", null],
     ]);
   });
 
   it("finds the version for a date", () => {
     expect(spanAt(spans, "2023-12-31")).toBeNull();
-    expect(spanAt(spans, "2025-06-19")?.version.name).toBe("v5");
-    expect(spanAt(spans, "2025-06-20")?.version.name).toBe("v6");
+    expect(spanAt(spans, "2025-06-19")?.version.name).toBe("1.0");
+    expect(spanAt(spans, "2025-06-20")?.version.name).toBe("2.0");
   });
 
   it("gives a month to the version active on the 15th", () => {
-    // v6 starts on the 20th, so June 2025 was mostly still v5.
-    expect(spanForMonth(spans, "2025-06")?.version.name).toBe("v5");
-    // v7 starts on the 14th, so it claims September.
-    expect(spanForMonth(spans, "2026-09")?.version.name).toBe("v7");
+    // 2.0 starts on the 20th, so June 2025 was mostly still 1.0.
+    expect(spanForMonth(spans, "2025-06")?.version.name).toBe("1.0");
+    // 3.0 starts on the 14th, so it claims September.
+    expect(spanForMonth(spans, "2026-09")?.version.name).toBe("3.0");
   });
 
-  it("totals and averages income per version over logged months only", () => {
+  it("averages income per version over logged months only", () => {
     const income = [
       { month: "2026-07", amount: 10000, note: "" },
       { month: "2026-08", amount: 20000, note: "" },
       { month: "2026-10", amount: 30000, note: "" },
     ];
-    const v6 = incomeInSpan(spans, spans[1], income);
-    expect(v6.total).toBe(30000);
-    expect(v6.avg).toBe(15000);
+    const second = incomeInSpan(spans, spans[1], income);
+    expect(second.total).toBe(30000);
+    expect(second.avg).toBe(15000);
     expect(incomeInSpan(spans, spans[0], income).avg).toBeNull();
   });
 
-  it("suggests the next name", () => {
-    expect(suggestNextName([v("v5", "2024-01-01"), v("v6", "2025-01-01")])).toBe("v7");
-    expect(suggestNextName([])).toBe("v1");
+  it("suggests the next release name", () => {
+    expect(suggestNextName([])).toBe("1.0");
+    expect(suggestNextName([v("1.0", "2024-01-01"), v("2.3", "2025-01-01")])).toBe("3.0");
+    expect(suggestNextName([v("Nik 2.0", "2025-01-01")])).toBe("Nik 3.0");
+    expect(suggestNextName([v("v6", "2025-01-01")])).toBe("v7");
     expect(suggestNextName([v("College", "2020-01-01")])).toBe("");
+  });
+
+  it("turns known issues into fixed or carried-over items", () => {
+    const prev = v("1.0", "2024-01-01", "- Overtrading\n• Sleep after 2am\nNo savings");
+    const next = carryOverNotes(prev, new Set(["Overtrading"]));
+    expect(next.fixed).toBe("Overtrading");
+    expect(next.known).toBe("Sleep after 2am\nNo savings");
+  });
+
+  it("splits release-note text into items", () => {
+    expect(noteLines("  - one\n\n* two \n three")).toEqual(["one", "two", "three"]);
+  });
+});
+
+describe("ladders", () => {
+  const ladder: Ladder = {
+    id: "b",
+    name: "Bouldering",
+    levels: BOULDERING_LEVELS,
+    area: "Climbing",
+    createdAt: "",
+  };
+  const moments = [
+    moment("v5-late", "2025-03-01", { ladder: { ladderId: "b", level: "V5" } }),
+    moment("v5", "2024-11-01", { ladder: { ladderId: "b", level: "V5" } }),
+    moment("v7", "2026-08-01", { ladder: { ladderId: "b", level: "V7" } }),
+    moment("other", "2026-09-01", { ladder: { ladderId: "x", level: "V9" } }),
+  ];
+
+  it("takes the first send of each level and measures steps", () => {
+    const p = ladderProgress(ladder, moments);
+    expect(p.rungs[5].moment?.id).toBe("v5");
+    expect(p.rungs[6].moment).toBeNull();
+    expect(p.top?.level).toBe("V7");
+    expect(p.next).toBe("V8");
+    expect(p.rungs[7].daysFromPrevious).toBe(638);
+  });
+
+  it("knows the level held on a past date", () => {
+    expect(levelAt(ladder, moments, "2024-10-31")).toBeNull();
+    expect(levelAt(ladder, moments, "2025-09-15")).toBe("V5");
+    expect(levelAt(ladder, moments, "2026-09-15")).toBe("V7");
+  });
+
+  it("labels step durations", () => {
+    expect(stepLabel(12)).toBe("12 days");
+    expect(stepLabel(213)).toBe("7 mo");
+    expect(stepLabel(430)).toBe("1 yr 2 mo");
+  });
+});
+
+describe("calendar", () => {
+  it("builds a Monday-first 42-cell grid", () => {
+    const grid = monthGrid("2026-09");
+    expect(grid).toHaveLength(42);
+    expect(grid[0].date).toBe("2026-08-31"); // Sep 1 2026 is a Tuesday
+    expect(grid[1]).toEqual({ date: "2026-09-01", inMonth: true });
+    expect(grid.filter((c) => c.inMonth)).toHaveLength(30);
   });
 });
 
@@ -115,19 +214,28 @@ describe("money", () => {
 });
 
 describe("doc", () => {
-  it("repairs stored data instead of crashing", () => {
+  it("upgrades a schema 1 doc and repairs bad records", () => {
     const doc = normalizeDoc({
+      schema: 1,
       moments: [{ date: "2026-01-02", title: "ok" }, { date: "not a date", title: "dropped" }],
+      versions: [{ name: "v5", startDate: "2024-01-01" }],
       income: [
         { month: "2026-01", amount: "100" },
         { month: "2026-01", amount: 999 },
       ],
       areas: [],
     });
+    expect(doc.schema).toBe(2);
     expect(doc.moments).toHaveLength(1);
-    expect(doc.moments[0].area).toBe("Other");
+    expect(doc.moments[0]).toMatchObject({ area: "Other", photos: [], ladder: null });
+    expect(doc.versions[0].notes).toEqual(emptyNotes());
+    expect(doc.ladders.map((l) => l.name)).toEqual(["Bouldering"]);
     expect(doc.income).toEqual([{ month: "2026-01", amount: 100, note: "" }]);
     expect(doc.areas.length).toBeGreaterThan(0);
+  });
+
+  it("keeps an intentionally empty ladder list", () => {
+    expect(normalizeDoc({ ladders: [] }).ladders).toEqual([]);
   });
 
   it("merges without overwriting what's already stored", () => {
@@ -150,5 +258,6 @@ describe("doc", () => {
     const merged = mergeDocs(base, local);
     expect(merged.moments.map((m) => m.title).sort()).toEqual(["new", "remote"]);
     expect(merged.income.map((i) => i.amount)).toEqual([1, 3]);
+    expect(merged.ladders).toHaveLength(1);
   });
 });

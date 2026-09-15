@@ -70,6 +70,19 @@ export function daysBetween(from: string, to: string): number {
   return Math.round((parseISO(to).getTime() - parseISO(from).getTime()) / DAY_MS);
 }
 
+/** The time between two consecutive story entries: "Same day", "3 weeks earlier", "1 year 2 months earlier". */
+export function gapLabel(days: number): string {
+  const d = Math.abs(days);
+  if (d === 0) return "Same day";
+  if (d < 14) return `${d} day${d === 1 ? "" : "s"} earlier`;
+  if (d < 60) return `${Math.round(d / 7)} weeks earlier`;
+  const months = Math.round(d / 30.44);
+  if (months < 12) return `${months} months earlier`;
+  const y = Math.floor(months / 12);
+  const r = months % 12;
+  return `${y} year${y === 1 ? "" : "s"}${r ? ` ${r} month${r === 1 ? "" : "s"}` : ""} earlier`;
+}
+
 /** Human length of a span: "12 days", "5 mo", "2 yr 3 mo". Inclusive of both ends. */
 export function spanLabel(from: string, to: string): string {
   const days = daysBetween(from, to) + 1;
